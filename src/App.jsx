@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { PlusCircle, Utensils, Activity, Settings, PieChart, Trash2, Calendar, Target, Flame, Sparkles, Loader2, Bot, Lightbulb, Check, BarChart2, Save } from 'lucide-react';
+import { PlusCircle, Utensils, Activity, Settings, PieChart, Trash2, Calendar, Target, Flame, Sparkles, Loader2, Bot, Lightbulb, Check, BarChart2, Save, X } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,23 +10,13 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithCustomToken, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
 import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, deleteDoc } from 'firebase/firestore';
 
-const firebaseConfig = {
-  apiKey: "AIzaSyDgNr63HCAur5Rq3BxZwP24PCQlHapZlWQ",
-  authDomain: "nutritrack-256ff.firebaseapp.com",
-  projectId: "nutritrack-256ff",
-  storageBucket: "nutritrack-256ff.firebasestorage.app",
-  messagingSenderId: "39592289747",
-  appId: "1:39592289747:web:abb9c9907d7c454144bb26",
-  measurementId: "G-FFNVM9477G"
-};
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
 export default function App() {
-  // --- State ---
-  // Goals
   const [goals, setGoals] = useState({
     calories: 2000,
     protein: 150,
@@ -34,42 +24,37 @@ export default function App() {
     fat: 65,
   });
 
-  // Today's Entries
   const [entries, setEntries] = useState([]);
   
-  // Form State
   const [newEntry, setNewEntry] = useState({
     name: '',
     calories: '',
     protein: '',
     carbs: '',
     fat: '',
-    type: 'meal', // 'meal' or 'exercise'
+    type: 'meal', 
   });
 
   const [isSearching, setIsSearching] = useState(false);
-
-  // Current Date (for display purposes)
   const [currentDate, setCurrentDate] = useState(new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }));
-
-  // Firebase User & Status
+  
   const [user, setUser] = useState(null);
   const [isSavingGoals, setIsSavingGoals] = useState(false);
 
-  // AI Coach State
   const [aiInsights, setAiInsights] = useState("");
   const [isFetchingInsights, setIsFetchingInsights] = useState(false);
   const [aiMealSuggestion, setAiMealSuggestion] = useState(null);
   const [isFetchingSuggestion, setIsFetchingSuggestion] = useState(false);
+  
+  // NEW: Mobile diagnostics state
+  const [mobileError, setMobileError] = useState(null);
 
-  // --- Effects ---
   useEffect(() => {
     const initAuth = async () => {
       try {
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
           await signInWithCustomToken(auth, __initial_auth_token);
         }
-        // Real users will use the Google Sign-in button instead of Anonymous auth
       } catch (error) {
         console.error("Auth error:", error);
       }
@@ -102,7 +87,6 @@ export default function App() {
     const entriesRef = collection(db, 'artifacts', appId, 'users', user.uid, 'entries');
     const unsubscribeEntries = onSnapshot(entriesRef, (snapshot) => {
       const loadedEntries = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      // Sort descending by timestamp
       loadedEntries.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
       setEntries(loadedEntries);
     }, (error) => console.error("Entries error:", error));
@@ -120,7 +104,6 @@ export default function App() {
     };
   }, [user]);
 
-  // --- Calculations ---
   const todayString = new Date().toDateString();
   const todaysEntries = entries.filter(e => new Date(e.timestamp).toDateString() === todayString);
 
@@ -166,34 +149,11 @@ export default function App() {
          daysLogged: data.daysLogged.size,
          avgNet: data.daysLogged.size ? Math.round((data.caloriesIn - data.caloriesOut) / data.daysLogged.size) : 0
       }))
-      .sort((a, b) => b.sortKey.localeCompare(a.sortKey)); // Sort newest month first
+      .sort((a, b) => b.sortKey.localeCompare(a.sortKey)); 
   };
   
   const monthlyReports = getMonthlyReports();
 
-  if (!user) {
-    return (
-      <div className="min-h-screen bg-fixed bg-cover bg-center font-sans flex items-center justify-center" style={{ backgroundImage: "url('https://images.unsplash.com/photo-1534438327276-14e5300c3a48?q=80&w=1470&auto=format&fit=crop')" }}>
-        <div className="fixed inset-0 bg-black/85 z-0" />
-        <div className="relative z-10 text-center p-6 w-full max-w-sm">
-          <Activity className="w-20 h-20 text-red-600 mx-auto mb-6 shadow-[0_0_15px_rgba(220,38,38,0.5)] rounded-full" />
-          <h1 className="text-4xl font-black text-white uppercase tracking-tight mb-2">NutriTrack</h1>
-          <p className="text-zinc-400 mb-10 font-medium">Log in to sync your data across all your devices.</p>
-          <Button onClick={handleGoogleLogin} className="w-full bg-white hover:bg-zinc-200 text-black font-bold py-6 rounded-full shadow-[0_0_20px_rgba(255,255,255,0.2)] text-lg flex items-center justify-center gap-3 transition-all">
-            <svg className="w-6 h-6" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-              <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
-              <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
-              <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
-              <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
-            </svg>
-            Sign in with Google
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  // --- Handlers ---
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setNewEntry(prev => ({
@@ -223,12 +183,11 @@ export default function App() {
 
   const handleAddEntry = async (e) => {
     e.preventDefault();
-    if (!newEntry.name || !newEntry.calories || !user) return; // Basic validation
+    if (!newEntry.name || !newEntry.calories || !user) return; 
 
     const entryToAdd = {
       ...newEntry,
       timestamp: new Date().toISOString(),
-      // Ensure numeric fields are 0 if empty
       protein: newEntry.protein || 0,
       carbs: newEntry.carbs || 0,
       fat: newEntry.fat || 0,
@@ -238,7 +197,6 @@ export default function App() {
       const entryId = Date.now().toString();
       await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'entries', entryId), entryToAdd);
       
-      // Reset form
       setNewEntry({
         name: '',
         calories: '',
@@ -262,11 +220,12 @@ export default function App() {
   };
 
   const handleAIFetch = async () => {
-    if (!newEntry.name) return; // Works for both meal and exercise now
+    if (!newEntry.name) return; 
     setIsSearching(true);
+    setMobileError(null);
     
     try {
-      const apiKey = import.meta.env.VITE_GEMINI_API_KEY; // The Canvas environment automatically provides the API key here
+      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
       const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
 
       let payload;
@@ -288,7 +247,6 @@ export default function App() {
           }
         };
       } else {
-        // Exercise prompt
         payload = {
           contents: [{ parts: [{ text: `Estimate the calories burned doing the following exercise: "${newEntry.name}". Assume an average adult (70kg/154lbs) doing it for 30 minutes if duration and weight are not specified in the input. Return a typical integer value.` }] }],
           generationConfig: {
@@ -306,9 +264,17 @@ export default function App() {
 
       const response = await fetch(apiUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Cache-Control': 'no-cache'
+        },
         body: JSON.stringify(payload)
       });
+
+      if (!response.ok) {
+        throw new Error(`HTTP Error ${response.status}: ${response.statusText}`);
+      }
 
       const result = await response.json();
       
@@ -324,7 +290,6 @@ export default function App() {
             fat: data.fat || ''
           }));
         } else {
-          // Only update calories for exercise
           setNewEntry(prev => ({
             ...prev,
             calories: data.calories || ''
@@ -333,6 +298,7 @@ export default function App() {
       }
     } catch (error) {
       console.error("Failed to fetch from Gemini API:", error);
+      setMobileError(`AI Auto-fill Error: ${error.message}`);
     } finally {
       setIsSearching(false);
     }
@@ -340,8 +306,9 @@ export default function App() {
 
   const handleGetInsights = async () => {
     setIsFetchingInsights(true);
+    setMobileError(null);
     try {
-      const apiKey = import.meta.env.VITE_GEMINI_API_KEY; // The Canvas environment automatically provides the API key here
+      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
       const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
 
       const prompt = `As a friendly, encouraging AI fitness and nutrition coach, provide a short 2-3 sentence analysis of my day so far.
@@ -352,9 +319,17 @@ export default function App() {
 
       const response = await fetch(apiUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Cache-Control': 'no-cache'
+        },
         body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
       });
+
+      if (!response.ok) {
+        throw new Error(`HTTP Error ${response.status}`);
+      }
 
       const result = await response.json();
       if (result.candidates?.[0]?.content?.parts?.[0]?.text) {
@@ -362,7 +337,8 @@ export default function App() {
       }
     } catch (error) {
       console.error("Failed to fetch insights:", error);
-      setAiInsights("Oops, I couldn't connect to my brain right now. Try again later!");
+      setMobileError(`Insights Error: ${error.message}`);
+      setAiInsights("Oops, I couldn't connect to my brain right now. Check the red diagnostic box.");
     } finally {
       setIsFetchingInsights(false);
     }
@@ -370,6 +346,7 @@ export default function App() {
 
   const handleGetMealSuggestion = async () => {
     setIsFetchingSuggestion(true);
+    setMobileError(null);
     try {
       const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
       const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
@@ -409,9 +386,17 @@ export default function App() {
 
       const response = await fetch(apiUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Cache-Control': 'no-cache'
+        },
         body: JSON.stringify(payload)
       });
+
+      if (!response.ok) {
+        throw new Error(`HTTP Error ${response.status}`);
+      }
 
       const result = await response.json();
       if (result.candidates?.[0]?.content?.parts?.[0]?.text) {
@@ -419,6 +404,7 @@ export default function App() {
       }
     } catch (error) {
       console.error("Failed to fetch meal suggestion:", error);
+      setMobileError(`Meal Suggestion Error: ${error.message}`);
     } finally {
       setIsFetchingSuggestion(false);
     }
@@ -438,13 +424,12 @@ export default function App() {
     };
     try {
       await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'entries', entryId), entryToAdd);
-      setAiMealSuggestion(null); // Clear after adding
+      setAiMealSuggestion(null); 
     } catch (error) {
       console.error("Failed to add suggestion:", error);
     }
   };
 
-  // --- Rendering Helpers ---
   const renderProgressBar = (current, max, colorClass) => {
     const percentage = Math.min(100, Math.max(0, (current / max) * 100)) || 0;
     return (
@@ -454,14 +439,35 @@ export default function App() {
     );
   };
 
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-fixed bg-cover bg-center font-sans flex items-center justify-center" style={{ backgroundImage: "url('https://images.unsplash.com/photo-1534438327276-14e5300c3a48?q=80&w=1470&auto=format&fit=crop')" }}>
+        <div className="fixed inset-0 bg-black/85 z-0" />
+        <div className="relative z-10 text-center p-6 w-full max-w-sm">
+          <Activity className="w-20 h-20 text-red-600 mx-auto mb-6 shadow-[0_0_15px_rgba(220,38,38,0.5)] rounded-full" />
+          <h1 className="text-4xl font-black text-white uppercase tracking-tight mb-2">NutriTrack</h1>
+          <p className="text-zinc-400 mb-10 font-medium">Log in to sync your data across all your devices.</p>
+          <Button onClick={handleGoogleLogin} className="w-full bg-white hover:bg-zinc-200 text-black font-bold py-6 rounded-full shadow-[0_0_20px_rgba(255,255,255,0.2)] text-lg flex items-center justify-center gap-3 transition-all">
+            <svg className="w-6 h-6" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+              <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
+              <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
+              <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
+              <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
+            </svg>
+            Sign in with Google
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-fixed bg-cover bg-center font-sans text-zinc-100" style={{ backgroundImage: "url('https://images.unsplash.com/photo-1534438327276-14e5300c3a48?q=80&w=1470&auto=format&fit=crop')" }}>
-      {/* Dark Overlay for readability */}
       <div className="fixed inset-0 bg-black/85 z-0" />
       
       <div className="relative z-10 pb-20 md:pb-0 sm:px-6 lg:px-8 max-w-md mx-auto md:max-w-4xl pt-4">
         {/* Header */}
-        <header className="mb-6 px-4 md:px-0">
+        <header className="mb-4 px-4 md:px-0">
           <h1 className="text-3xl font-black text-white flex items-center gap-2 uppercase tracking-tight">
             <Activity className="text-red-600" size={32} />
             NutriTrack
@@ -471,8 +477,16 @@ export default function App() {
           </p>
         </header>
 
+        {/* MOBILE ERROR DIAGNOSTIC DISPLAY */}
+        {mobileError && (
+          <div className="mx-4 md:mx-0 mb-6 bg-red-950 border border-red-500 text-white p-4 rounded-xl shadow-[0_0_15px_rgba(220,38,38,0.5)] relative">
+            <p className="font-bold mb-1 flex items-center gap-2"><X className="w-4 h-4" /> Connection Blocked</p>
+            <p className="text-sm text-zinc-300 break-words">{mobileError}</p>
+            <button onClick={() => setMobileError(null)} className="absolute top-2 right-2 text-zinc-400 hover:text-white">✕</button>
+          </div>
+        )}
+
         <Tabs defaultValue="dashboard" className="w-full">
-          {/* Navigation / Tab List (Bottom on mobile, top on desktop) */}
           <div className="fixed bottom-0 left-0 right-0 bg-black border-t border-red-900/50 z-50 md:relative md:border-none md:bg-transparent md:mb-6 shadow-[0_-5px_20px_rgba(0,0,0,0.8)] md:shadow-none">
             <TabsList className="flex overflow-x-auto w-full h-16 md:h-12 md:max-w-2xl md:mx-auto bg-transparent md:bg-zinc-900/50 md:border md:border-red-900/30 rounded-none md:rounded-xl hide-scrollbar" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
               <TabsTrigger value="dashboard" className="flex flex-col md:flex-row gap-1 data-[state=active]:text-red-500 data-[state=active]:bg-red-950/30 text-zinc-500 rounded-lg min-w-[75px] mx-1 transition-all flex-1">
@@ -504,7 +518,6 @@ export default function App() {
 
           {/* --- Dashboard Tab --- */}
           <TabsContent value="dashboard" className="px-4 md:px-0 mt-0 animate-in fade-in zoom-in-95 duration-200">
-            {/* Main Calorie Summary */}
             <Card className="border border-red-900/30 bg-black/60 backdrop-blur-md shadow-2xl mb-6">
               <CardHeader className="pb-2 border-b border-red-900/20">
                 <CardTitle className="text-lg font-bold flex items-center gap-2 text-white">
@@ -541,9 +554,7 @@ export default function App() {
               </CardContent>
             </Card>
 
-            {/* Macros Summary */}
             <div className="grid grid-cols-3 gap-4 mb-6">
-               {/* Protein */}
                <Card className="border border-red-900/30 bg-black/60 backdrop-blur-md shadow-xl">
                  <CardContent className="p-4 flex flex-col items-center">
                    <p className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-1">Protein</p>
@@ -552,7 +563,6 @@ export default function App() {
                    {renderProgressBar(totals.protein, goals.protein, 'bg-red-500')}
                  </CardContent>
                </Card>
-               {/* Carbs */}
                <Card className="border border-red-900/30 bg-black/60 backdrop-blur-md shadow-xl">
                  <CardContent className="p-4 flex flex-col items-center">
                    <p className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-1">Carbs</p>
@@ -561,7 +571,6 @@ export default function App() {
                    {renderProgressBar(totals.carbs, goals.carbs, 'bg-red-700')}
                  </CardContent>
                </Card>
-               {/* Fat */}
                <Card className="border border-red-900/30 bg-black/60 backdrop-blur-md shadow-xl">
                  <CardContent className="p-4 flex flex-col items-center">
                    <p className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-1">Fat</p>
@@ -582,8 +591,6 @@ export default function App() {
               </CardHeader>
               <CardContent className="pt-6">
                 <form onSubmit={handleAddEntry} className="space-y-5">
-                  
-                  {/* Entry Type Toggle */}
                   <div className="flex bg-zinc-900/80 p-1 rounded-lg border border-red-900/30">
                     <button
                       type="button"
@@ -641,7 +648,6 @@ export default function App() {
                     />
                   </div>
 
-                  {/* Macro Inputs - Only show if type is 'meal' */}
                   {newEntry.type === 'meal' && (
                     <div className="grid grid-cols-3 gap-3 pt-2">
                       <div className="space-y-2">
@@ -912,5 +918,5 @@ export default function App() {
         </Tabs>
       </div>
     </div>
-  );
+  ); \\forced mobile update
 }

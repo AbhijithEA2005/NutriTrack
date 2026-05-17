@@ -918,5 +918,5 @@ export default function App() {
         </Tabs>
       </div>
     </div>
-  ); \\forced mobile update
+  );
 }

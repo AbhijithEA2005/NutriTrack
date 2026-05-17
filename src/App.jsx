@@ -266,7 +266,7 @@ export default function App() {
     setIsSearching(true);
     
     try {
-      const apiKey = ""; // The Canvas environment automatically provides the API key here
+      const apiKey = import.meta.env.VITE_GEMINI_API_KEY; // The Canvas environment automatically provides the API key here
       const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
 
       let payload;
@@ -341,7 +341,7 @@ export default function App() {
   const handleGetInsights = async () => {
     setIsFetchingInsights(true);
     try {
-      const apiKey = ""; // The Canvas environment automatically provides the API key here
+      const apiKey = import.meta.env.VITE_GEMINI_API_KEY; // The Canvas environment automatically provides the API key here
       const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
 
       const prompt = `As a friendly, encouraging AI fitness and nutrition coach, provide a short 2-3 sentence analysis of my day so far.
@@ -371,7 +371,7 @@ export default function App() {
   const handleGetMealSuggestion = async () => {
     setIsFetchingSuggestion(true);
     try {
-      const apiKey = "";
+      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
       const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
 
       const remainingCal = goals.calories - (totals.caloriesIn - totals.caloriesOut);

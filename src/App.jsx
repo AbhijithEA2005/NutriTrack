@@ -1,12 +1,28 @@
 import React, { useState, useEffect } from 'react';
-import { PlusCircle, Utensils, Activity, Settings, PieChart, Trash2, Calendar, Target, Flame, Sparkles, Loader2, Bot, Lightbulb, Check } from 'lucide-react';
+import { PlusCircle, Utensils, Activity, Settings, PieChart, Trash2, Calendar, Target, Flame, Sparkles, Loader2, Bot, Lightbulb, Check, BarChart2, Save } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
-const STORAGE_KEY = 'calorie_tracker_data';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInWithCustomToken, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
+import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, deleteDoc } from 'firebase/firestore';
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDgNr63HCAur5Rq3BxZwP24PCQlHapZlWQ",
+  authDomain: "nutritrack-256ff.firebaseapp.com",
+  projectId: "nutritrack-256ff",
+  storageBucket: "nutritrack-256ff.firebasestorage.app",
+  messagingSenderId: "39592289747",
+  appId: "1:39592289747:web:abb9c9907d7c454144bb26",
+  measurementId: "G-FFNVM9477G"
+};
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
 export default function App() {
   // --- State ---
@@ -36,6 +52,10 @@ export default function App() {
   // Current Date (for display purposes)
   const [currentDate, setCurrentDate] = useState(new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }));
 
+  // Firebase User & Status
+  const [user, setUser] = useState(null);
+  const [isSavingGoals, setIsSavingGoals] = useState(false);
+
   // AI Coach State
   const [aiInsights, setAiInsights] = useState("");
   const [isFetchingInsights, setIsFetchingInsights] = useState(false);
@@ -43,17 +63,69 @@ export default function App() {
   const [isFetchingSuggestion, setIsFetchingSuggestion] = useState(false);
 
   // --- Effects ---
-  // Load data from local storage on mount (simulated for now, keeping it single-session robust as per rules, but showing the structure)
   useEffect(() => {
-    // In a real app with persistence, we'd load here.
-    // For this environment, we'll start fresh each time unless hooked up to Firebase later.
-    // const savedData = localStorage.getItem(STORAGE_KEY);
-    // if (savedData) { ... }
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        }
+        // Real users will use the Google Sign-in button instead of Anonymous auth
+      } catch (error) {
+        console.error("Auth error:", error);
+      }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, setUser);
+    return () => unsubscribe();
   }, []);
 
+  const handleGoogleLogin = async () => {
+    const provider = new GoogleAuthProvider();
+    try {
+      await signInWithPopup(auth, provider);
+    } catch (error) {
+      console.error("Login failed:", error);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+    } catch (error) {
+      console.error("Logout failed:", error);
+    }
+  };
+
+  useEffect(() => {
+    if (!user) return;
+
+    const entriesRef = collection(db, 'artifacts', appId, 'users', user.uid, 'entries');
+    const unsubscribeEntries = onSnapshot(entriesRef, (snapshot) => {
+      const loadedEntries = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      // Sort descending by timestamp
+      loadedEntries.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+      setEntries(loadedEntries);
+    }, (error) => console.error("Entries error:", error));
+
+    const goalsRef = doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'goals');
+    const unsubscribeGoals = onSnapshot(goalsRef, (docSnap) => {
+      if (docSnap.exists()) {
+        setGoals(docSnap.data());
+      }
+    }, (error) => console.error("Goals error:", error));
+
+    return () => {
+      unsubscribeEntries();
+      unsubscribeGoals();
+    };
+  }, [user]);
+
   // --- Calculations ---
+  const todayString = new Date().toDateString();
+  const todaysEntries = entries.filter(e => new Date(e.timestamp).toDateString() === todayString);
+
   const calculateTotals = () => {
-    return entries.reduce((acc, entry) => {
+    return todaysEntries.reduce((acc, entry) => {
       if (entry.type === 'meal') {
         acc.caloriesIn += entry.calories || 0;
         acc.protein += entry.protein || 0;
@@ -69,6 +141,57 @@ export default function App() {
   const totals = calculateTotals();
   const netCalories = totals.caloriesIn - totals.caloriesOut;
   const remainingCalories = goals.calories - netCalories;
+
+  const getMonthlyReports = () => {
+    const reports = {};
+    entries.forEach(entry => {
+       const date = new Date(entry.timestamp);
+       const monthYear = date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+       if (!reports[monthYear]) {
+          reports[monthYear] = { caloriesIn: 0, caloriesOut: 0, daysLogged: new Set(), sortKey: `${date.getFullYear()}-${String(date.getMonth()).padStart(2, '0')}` };
+       }
+       reports[monthYear].daysLogged.add(date.toDateString());
+
+       if (entry.type === 'meal') {
+         reports[monthYear].caloriesIn += entry.calories || 0;
+       } else if (entry.type === 'exercise') {
+         reports[monthYear].caloriesOut += entry.calories || 0;
+       }
+    });
+    
+    return Object.entries(reports)
+      .map(([month, data]) => ({
+         month,
+         ...data,
+         daysLogged: data.daysLogged.size,
+         avgNet: data.daysLogged.size ? Math.round((data.caloriesIn - data.caloriesOut) / data.daysLogged.size) : 0
+      }))
+      .sort((a, b) => b.sortKey.localeCompare(a.sortKey)); // Sort newest month first
+  };
+  
+  const monthlyReports = getMonthlyReports();
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-fixed bg-cover bg-center font-sans flex items-center justify-center" style={{ backgroundImage: "url('https://images.unsplash.com/photo-1534438327276-14e5300c3a48?q=80&w=1470&auto=format&fit=crop')" }}>
+        <div className="fixed inset-0 bg-black/85 z-0" />
+        <div className="relative z-10 text-center p-6 w-full max-w-sm">
+          <Activity className="w-20 h-20 text-red-600 mx-auto mb-6 shadow-[0_0_15px_rgba(220,38,38,0.5)] rounded-full" />
+          <h1 className="text-4xl font-black text-white uppercase tracking-tight mb-2">NutriTrack</h1>
+          <p className="text-zinc-400 mb-10 font-medium">Log in to sync your data across all your devices.</p>
+          <Button onClick={handleGoogleLogin} className="w-full bg-white hover:bg-zinc-200 text-black font-bold py-6 rounded-full shadow-[0_0_20px_rgba(255,255,255,0.2)] text-lg flex items-center justify-center gap-3 transition-all">
+            <svg className="w-6 h-6" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+              <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
+              <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
+              <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
+              <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
+            </svg>
+            Sign in with Google
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   // --- Handlers ---
   const handleInputChange = (e) => {
@@ -87,13 +210,23 @@ export default function App() {
      }));
   }
 
-  const handleAddEntry = (e) => {
+  const handleSaveGoals = async () => {
+    if (!user) return;
+    setIsSavingGoals(true);
+    try {
+      await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'goals'), goals);
+    } catch (error) {
+      console.error("Failed to save goals:", error);
+    }
+    setIsSavingGoals(false);
+  };
+
+  const handleAddEntry = async (e) => {
     e.preventDefault();
-    if (!newEntry.name || !newEntry.calories) return; // Basic validation
+    if (!newEntry.name || !newEntry.calories || !user) return; // Basic validation
 
     const entryToAdd = {
       ...newEntry,
-      id: Date.now().toString(),
       timestamp: new Date().toISOString(),
       // Ensure numeric fields are 0 if empty
       protein: newEntry.protein || 0,
@@ -101,21 +234,31 @@ export default function App() {
       fat: newEntry.fat || 0,
     };
 
-    setEntries(prev => [entryToAdd, ...prev]);
-    
-    // Reset form
-    setNewEntry({
-      name: '',
-      calories: '',
-      protein: '',
-      carbs: '',
-      fat: '',
-      type: newEntry.type, // Keep the same type selected
-    });
+    try {
+      const entryId = Date.now().toString();
+      await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'entries', entryId), entryToAdd);
+      
+      // Reset form
+      setNewEntry({
+        name: '',
+        calories: '',
+        protein: '',
+        carbs: '',
+        fat: '',
+        type: newEntry.type,
+      });
+    } catch (error) {
+      console.error("Failed to add entry:", error);
+    }
   };
 
-  const handleDeleteEntry = (id) => {
-    setEntries(prev => prev.filter(entry => entry.id !== id));
+  const handleDeleteEntry = async (id) => {
+    if (!user) return;
+    try {
+      await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'entries', id));
+    } catch (error) {
+      console.error("Failed to delete entry:", error);
+    }
   };
 
   const handleAIFetch = async () => {
@@ -123,7 +266,7 @@ export default function App() {
     setIsSearching(true);
     
     try {
-     const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+      const apiKey = ""; // The Canvas environment automatically provides the API key here
       const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
 
       let payload;
@@ -204,7 +347,7 @@ export default function App() {
       const prompt = `As a friendly, encouraging AI fitness and nutrition coach, provide a short 2-3 sentence analysis of my day so far.
       My daily goal is ${goals.calories} kcal.
       So far I've eaten ${totals.caloriesIn} kcal and burned ${totals.caloriesOut} kcal.
-      Here are my logs: ${entries.map(e => `${e.name} (${e.type}: ${e.calories}kcal)`).join(', ')}.
+      Here are my logs: ${todaysEntries.map(e => `${e.name} (${e.type}: ${e.calories}kcal)`).join(', ')}.
       Give me a quick tip or encouragement based on what I've logged. Keep it concise.`;
 
       const response = await fetch(apiUrl, {
@@ -281,8 +424,9 @@ export default function App() {
     }
   };
 
-  const handleAddSuggestedMeal = () => {
-    if (!aiMealSuggestion) return;
+  const handleAddSuggestedMeal = async () => {
+    if (!aiMealSuggestion || !user) return;
+    const entryId = Date.now().toString();
     const entryToAdd = {
       name: aiMealSuggestion.name,
       calories: aiMealSuggestion.calories,
@@ -290,11 +434,14 @@ export default function App() {
       carbs: aiMealSuggestion.carbs,
       fat: aiMealSuggestion.fat,
       type: 'meal',
-      id: Date.now().toString(),
       timestamp: new Date().toISOString(),
     };
-    setEntries(prev => [entryToAdd, ...prev]);
-    setAiMealSuggestion(null); // Clear after adding
+    try {
+      await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'entries', entryId), entryToAdd);
+      setAiMealSuggestion(null); // Clear after adding
+    } catch (error) {
+      console.error("Failed to add suggestion:", error);
+    }
   };
 
   // --- Rendering Helpers ---
@@ -327,24 +474,28 @@ export default function App() {
         <Tabs defaultValue="dashboard" className="w-full">
           {/* Navigation / Tab List (Bottom on mobile, top on desktop) */}
           <div className="fixed bottom-0 left-0 right-0 bg-black border-t border-red-900/50 z-50 md:relative md:border-none md:bg-transparent md:mb-6 shadow-[0_-5px_20px_rgba(0,0,0,0.8)] md:shadow-none">
-            <TabsList className="grid w-full grid-cols-5 h-16 md:h-12 md:max-w-xl md:mx-auto bg-transparent md:bg-zinc-900/50 md:border md:border-red-900/30 rounded-none md:rounded-xl">
-              <TabsTrigger value="dashboard" className="flex flex-col md:flex-row gap-1 data-[state=active]:text-red-500 data-[state=active]:bg-red-950/30 text-zinc-500 rounded-lg mx-1 transition-all">
+            <TabsList className="flex overflow-x-auto w-full h-16 md:h-12 md:max-w-2xl md:mx-auto bg-transparent md:bg-zinc-900/50 md:border md:border-red-900/30 rounded-none md:rounded-xl hide-scrollbar" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+              <TabsTrigger value="dashboard" className="flex flex-col md:flex-row gap-1 data-[state=active]:text-red-500 data-[state=active]:bg-red-950/30 text-zinc-500 rounded-lg min-w-[75px] mx-1 transition-all flex-1">
                 <PieChart className="w-5 h-5" />
                 <span className="text-xs md:text-sm font-semibold">Summary</span>
               </TabsTrigger>
-              <TabsTrigger value="log" className="flex flex-col md:flex-row gap-1 data-[state=active]:text-red-500 data-[state=active]:bg-red-950/30 text-zinc-500 rounded-lg mx-1 transition-all">
+              <TabsTrigger value="log" className="flex flex-col md:flex-row gap-1 data-[state=active]:text-red-500 data-[state=active]:bg-red-950/30 text-zinc-500 rounded-lg min-w-[75px] mx-1 transition-all flex-1">
                 <PlusCircle className="w-5 h-5" />
                 <span className="text-xs md:text-sm font-semibold">Log</span>
               </TabsTrigger>
-              <TabsTrigger value="history" className="flex flex-col md:flex-row gap-1 data-[state=active]:text-red-500 data-[state=active]:bg-red-950/30 text-zinc-500 rounded-lg mx-1 transition-all">
+              <TabsTrigger value="history" className="flex flex-col md:flex-row gap-1 data-[state=active]:text-red-500 data-[state=active]:bg-red-950/30 text-zinc-500 rounded-lg min-w-[75px] mx-1 transition-all flex-1">
                 <Utensils className="w-5 h-5" />
                 <span className="text-xs md:text-sm font-semibold">Entries</span>
               </TabsTrigger>
-              <TabsTrigger value="settings" className="flex flex-col md:flex-row gap-1 data-[state=active]:text-red-500 data-[state=active]:bg-red-950/30 text-zinc-500 rounded-lg mx-1 transition-all">
+              <TabsTrigger value="reports" className="flex flex-col md:flex-row gap-1 data-[state=active]:text-red-500 data-[state=active]:bg-red-950/30 text-zinc-500 rounded-lg min-w-[75px] mx-1 transition-all flex-1">
+                <BarChart2 className="w-5 h-5" />
+                <span className="text-xs md:text-sm font-semibold">Reports</span>
+              </TabsTrigger>
+              <TabsTrigger value="settings" className="flex flex-col md:flex-row gap-1 data-[state=active]:text-red-500 data-[state=active]:bg-red-950/30 text-zinc-500 rounded-lg min-w-[75px] mx-1 transition-all flex-1">
                 <Settings className="w-5 h-5" />
                 <span className="text-xs md:text-sm font-semibold">Goals</span>
               </TabsTrigger>
-              <TabsTrigger value="coach" className="flex flex-col md:flex-row gap-1 data-[state=active]:text-red-500 data-[state=active]:bg-red-950/30 text-zinc-500 rounded-lg mx-1 transition-all">
+              <TabsTrigger value="coach" className="flex flex-col md:flex-row gap-1 data-[state=active]:text-red-500 data-[state=active]:bg-red-950/30 text-zinc-500 rounded-lg min-w-[75px] mx-1 transition-all flex-1">
                 <Bot className="w-5 h-5" />
                 <span className="text-xs md:text-sm font-semibold">Coach</span>
               </TabsTrigger>
@@ -536,7 +687,7 @@ export default function App() {
                 <CardTitle className="text-white">Today's Log</CardTitle>
               </CardHeader>
               <CardContent className="pt-6">
-                {entries.length === 0 ? (
+                {todaysEntries.length === 0 ? (
                   <div className="text-center py-8 text-zinc-500">
                     <Utensils className="w-12 h-12 mx-auto text-red-900/50 mb-3" />
                     <p className="font-medium">No entries yet today.</p>
@@ -544,7 +695,7 @@ export default function App() {
                   </div>
                 ) : (
                   <ul className="space-y-3">
-                    {entries.map((entry) => (
+                    {todaysEntries.map((entry) => (
                       <li key={entry.id} className="flex items-center justify-between p-4 rounded-xl border border-red-900/30 bg-zinc-900/80 shadow-lg">
                         <div className="flex items-center gap-4">
                           <div className={`p-3 rounded-lg ${entry.type === 'meal' ? 'bg-red-950/50 text-red-500 border border-red-900/50' : 'bg-orange-950/50 text-orange-500 border border-orange-900/50'}`}>
@@ -624,7 +775,74 @@ export default function App() {
                         </div>
                       </div>
                     </div>
+                    
+                    <Button 
+                      onClick={handleSaveGoals} 
+                      disabled={isSavingGoals}
+                      className="w-full mt-4 bg-zinc-800 hover:bg-zinc-700 text-white font-bold border border-zinc-600 shadow-md"
+                    >
+                      {isSavingGoals ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                      Save Goals
+                    </Button>
+
+                    <div className="pt-6 mt-6 border-t border-red-900/20">
+                      <Button 
+                        onClick={handleLogout} 
+                        variant="outline"
+                        className="w-full border-red-900/50 text-red-500 hover:bg-red-950/50 hover:text-white font-bold"
+                      >
+                        Sign Out
+                      </Button>
+                    </div>
                  </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* --- Reports Tab --- */}
+          <TabsContent value="reports" className="px-4 md:px-0 mt-0 animate-in slide-in-from-right-4 duration-200 space-y-6">
+            <Card className="border border-red-900/30 bg-black/60 backdrop-blur-md shadow-2xl">
+              <CardHeader className="border-b border-red-900/20">
+                <CardTitle className="text-white flex items-center gap-2">
+                  <BarChart2 className="w-5 h-5 text-red-500" /> Monthly Reports
+                </CardTitle>
+                <CardDescription className="text-zinc-400">Your historical performance over time.</CardDescription>
+              </CardHeader>
+              <CardContent className="pt-6">
+                {monthlyReports.length === 0 ? (
+                  <div className="text-center py-8 text-zinc-500">
+                    <BarChart2 className="w-12 h-12 mx-auto text-red-900/50 mb-3" />
+                    <p className="font-medium">No data available yet.</p>
+                    <p className="text-sm">Keep logging to generate reports!</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {monthlyReports.map((report) => (
+                      <div key={report.month} className="p-4 rounded-xl border border-red-900/30 bg-zinc-900/80 shadow-lg">
+                        <div className="flex justify-between items-center mb-3 pb-2 border-b border-zinc-800">
+                          <h4 className="font-black text-white text-lg">{report.month}</h4>
+                          <span className="text-xs text-zinc-400 font-bold bg-zinc-800 px-2 py-1 rounded-md">{report.daysLogged} days logged</span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 text-center">
+                          <div>
+                            <p className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-1">Eaten</p>
+                            <p className="text-sm font-bold text-white">{report.caloriesIn.toLocaleString()}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-1">Burned</p>
+                            <p className="text-sm font-bold text-orange-400">{report.caloriesOut.toLocaleString()}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-1">Avg Net</p>
+                            <p className={`text-sm font-black ${report.avgNet > goals.calories ? 'text-red-500' : 'text-green-500'}`}>
+                              {report.avgNet.toLocaleString()}/day
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>

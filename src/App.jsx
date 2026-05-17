@@ -10,7 +10,15 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithCustomToken, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
 import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, deleteDoc } from 'firebase/firestore';
 
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+const firebaseConfig = {
+  apiKey: "AIzaSyDgNr63HCAur5Rq3BxZwP24PCQlHapZlWQ",
+  authDomain: "nutritrack-256ff.firebaseapp.com",
+  projectId: "nutritrack-256ff",
+  storageBucket: "nutritrack-256ff.firebasestorage.app",
+  messagingSenderId: "39592289747",
+  appId: "1:39592289747:web:abb9c9907d7c454144bb26",
+  measurementId: "G-FFNVM9477G"
+};
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
